@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portfolio Tracker Pro</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- FontAwesome per le icone -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Stile personalizzato per la scrollbar della visualizzazione verticale */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 5px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-100 font-sans text-slate-800 p-4 md:p-8">
+
+    <div class="max-w-7xl mx-auto space-y-8">
+        <!-- Header -->
+        <header class="flex items-center space-x-4 mb-8 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <div class="p-4 bg-blue-600 rounded-xl text-white font-bold text-2xl shadow-lg shadow-blue-200">
+                <i class="fa-solid fa-chart-line"></i>
+            </div>
+            <div>
+                <h1 class="text-3xl font-extrabold text-slate-900">Portfolio Tracker Pro</h1>
+                <p class="text-slate-500 text-sm mt-1">Analisi Avanzata con Rendimenti MoM, Beta e Categorie Target[cite: 1]</p>
+            </div>
+        </header>
+
+        <!-- Form Inserimento -->
+        <section class="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
+            <div class="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+                <i class="fa-solid fa-globe text-9xl"></i>
+            </div>
+            
+            <form id="stockForm" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 items-start relative z-10">
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Ticker (Simbolo) *</label>
+                    <input type="text" id="ticker" required class="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-lg uppercase focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="es. AAPL, ISP.MI">
+                    <p class="text-xs text-slate-500 mt-1.5"><i class="fa-solid fa-circle-info text-blue-500"></i> Italia: aggiungi <b>.MI</b></p>
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Data Inizio *</label>
+                    <input type="month" id="purchaseDate" required class="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Target Totale (%)</label>
+                    <input type="number" id="targetReturn" step="0.1" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="es. 15, 50 (Opzionale)">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Orizzonte (Mesi)</label>
+                    <input type="number" id="months" min="1" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" placeholder="es. 3, 12, 60 (Opzionale)">
+                </div>
+                
+                <div class="flex items-end h-full">
+                    <button type="submit" id="submitBtn" class="w-full bg-slate-900 hover:bg-blue-600 text-white font-semibold py-2.5 rounded-lg transition-all shadow-md flex items-center justify-center gap-2">
+                        <span>Analizza</span> <i class="fa-solid fa-magnifying-glass"></i>
+                    </button>
+                </div>
+            </form>
+            <div class="mt-3 text-[11px] text-slate-400 font-medium z-10 relative">
+                Categorie Automatiche: Medio 3m (15% 3mesi) | Medio 1y (50% 12mesi) | Lungo (No Target 60mesi).
+            </div>
+            <div id="errorMsg" class="mt-6 p-4 bg-red-50 text-red-700 border-l-4 border-red-500 rounded-r-lg text-sm hidden font-medium flex items-center gap-2"></div>
+        </section>
+
+        <!-- Container Grafici -->
+        <div id="chartsContainer" class="grid grid-cols-1 gap-8"></div>
+    </div>
+
+    <script>
+        const fetchWithTimeout = async (resource, options = {}) => {
+            const { timeout = 8000 } = options;
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeout);
+            const response = await fetch(resource, {
+                ...options,
+                signal: controller.signal
+            });
+            clearTimeout(id);
+            return response;
+        };
+
+        async function fetchFromYahoo(ticker, startUnix, endUnix) {
+            const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1mo&period1=${startUnix}&period2=${endUnix}`;
+            
+            const proxies = [
+                `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+                `https://corsproxy.io/?${encodeURIComponent(url)}`,
+                `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
+            ];
+
+            for (const proxy of proxies) {
+                try {
+                    const res = await fetchWithTimeout(proxy, { timeout: 6000 });
+                    if (!res.ok) continue;
+                    
+                    const data = await res.json();
+                    if (data.chart?.error) throw new Error(data.chart.error.description || 'Simbolo non trovato.');
+                    if (data.chart?.result?.[0]) return data.chart.result[0];
+                } catch (err) {
+                    console.warn(`Fallito tentativo con proxy: ${proxy.substring(0, 25)}...`, err.message);
+                }
+            }
+            throw new Error(`Impossibile recuperare i dati per ${ticker}. Verifica che il simbolo sia corretto (es. aggiungi .MI per l'Italia) o riprova più tardi.`);
+        }
+
+        async function fetchRealMarketData(ticker, purchaseDate, targetReturnTotal, horizonMonths) {
+            const startDate = new Date(purchaseDate);
+            startDate.setDate(1);
+            const startUnix = Math.floor(startDate.getTime() / 1000);
+            const endUnix = Math.floor(new Date().getTime() / 1000) + (86400 * 30);
+
+            const [stockResult, sp500Result] = await Promise.all([
+                fetchFromYahoo(ticker, startUnix, endUnix),
+                fetchFromYahoo('^GSPC', startUnix, endUnix)
+            ]);
+
+            const processData = (result) => {
+                const timestamps = result.timestamp || [];
+                const closes = result.indicators.quote[0].close || [];
+                const map = {};
+                timestamps.forEach((ts, i) => {
+                    if (closes[i] !== null && closes[i] !== undefined) {
+                        const date = new Date(ts * 1000);
+                        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                        map[key] = closes[i];
+                    }
+                });
+                return map;
+            };
+
+            const stockMap = processData(stockResult);
+            const sp500Map = processData(sp500Result);
+
+            let commonMonths = Object.keys(stockMap).filter(month => sp500Map[month]);
+            commonMonths.sort();
+
+            if (commonMonths.length === 0) throw new Error("Nessun dato storico comune tra l'azione e l'indice nel periodo selezionato.");
+
+            let actualAvailableMonths = commonMonths.length - 1; 
+            if (!isNaN(horizonMonths) && horizonMonths > 0) {
+                commonMonths = commonMonths.slice(0, horizonMonths + 1);
+            }
+            
+            let expectedHorizon = (!isNaN(horizonMonths) && horizonMonths > 0) ? horizonMonths : actualAvailableMonths;
+            const hasTarget = !isNaN(targetReturnTotal) && targetReturnTotal !== null;
+            let targetMonthlyGrowth = 0;
+            if (hasTarget && expectedHorizon > 0) {
+                targetMonthlyGrowth = Math.pow(1 + (targetReturnTotal / 100), 1 / expectedHorizon) - 1;
+            }
+
+            const mergedData = { 
+                labels: [], stock: [], sp500: [], target: [], 
+                stockMoM: [], sp500MoM: [], 
+                finalStats: { hasTarget } 
+            };
+            
+            let baseStock = stockMap[commonMonths[0]];
+            let baseSP500 = sp500Map[commonMonths[0]];
+            let prevStock = baseStock;
+            let prevSP500 = baseSP500;
+
+            commonMonths.forEach((monthKey, i) => {
+                const [year, month] = monthKey.split('-');
+                const dateObj = new Date(year, month - 1);
+                const monthStr = dateObj.toLocaleDateString('it-IT', { month: 'short', year: '2-digit' });
+
+                const currentStock = stockMap[monthKey];
+                const currentSP500 = sp500Map[monthKey];
+
+                // Cumulato (per grafico principale)
+                const stockReturn = ((currentStock / baseStock) - 1) * 100;
+                const sp500Return = ((currentSP500 / baseSP500) - 1) * 100;
+                
+                // Mese su Mese (MoM)
+                let sMoM = 0;
+                let spMoM = 0;
+                if (i > 0) {
+                    sMoM = ((currentStock / prevStock) - 1) * 100;
+                    spMoM = ((currentSP500 / prevSP500) - 1) * 100;
+                }
+                
+                mergedData.labels.push(`${monthStr}`);
+                mergedData.stock.push(parseFloat(stockReturn.toFixed(2)));
+                mergedData.sp500.push(parseFloat(sp500Return.toFixed(2)));
+                mergedData.stockMoM.push(parseFloat(sMoM.toFixed(2)));
+                mergedData.sp500MoM.push(parseFloat(spMoM.toFixed(2)));
+                
+                if (hasTarget) {
+                    const expectedTarget = ((Math.pow(1 + targetMonthlyGrowth, i) - 1) * 100);
+                    mergedData.target.push(parseFloat(expectedTarget.toFixed(2)));
+                }
+
+                prevStock = currentStock;
+                prevSP500 = currentSP500;
+            });
+
+            // --- Calcolo BETA ---
+            const sReturns = mergedData.stockMoM.slice(1);
+            const mReturns = mergedData.sp500MoM.slice(1);
+            let beta = 1;
+
+            if (sReturns.length >= 2) {
+                const meanMarket = mReturns.reduce((a, b) => a + b, 0) / mReturns.length;
+                const meanStock = sReturns.reduce((a, b) => a + b, 0) / sReturns.length;
+                
+                let covariance = 0;
+                let varianceMarket = 0;
+                
+                for(let j = 0; j < sReturns.length; j++) {
+                    covariance += (sReturns[j] - meanStock) * (mReturns[j] - meanMarket);
+                    varianceMarket += Math.pow(mReturns[j] - meanMarket, 2);
+                }
+                if (varianceMarket !== 0) beta = covariance / varianceMarket;
+            }
+            mergedData.finalStats.beta = beta;
+
+            // --- Controllo Sottoperformance Consecutiva Mese su Mese ---
+            let maxConsecutiveUnder = 0;
+            let currentConsecutive = 0;
+            for (let j = 1; j < mergedData.stockMoM.length; j++) {
+                if (mergedData.stockMoM[j] < mergedData.sp500MoM[j]) {
+                    currentConsecutive++;
+                    if (currentConsecutive > maxConsecutiveUnder) maxConsecutiveUnder = currentConsecutive;
+                } else {
+                    currentConsecutive = 0;
+                }
+            }
+            mergedData.finalStats.maxConsecutiveUnder = maxConsecutiveUnder;
+
+            const lastIndex = mergedData.stock.length - 1;
+            mergedData.finalStats.stockFinal = mergedData.stock[lastIndex];
+            mergedData.finalStats.sp500Final = mergedData.sp500[lastIndex];
+            if (hasTarget) mergedData.finalStats.targetFinal = mergedData.target[lastIndex];
+            mergedData.finalStats.monthsAnalyzed = mergedData.labels.length - 1;
+
+            return mergedData;
+        }
+
+        let stocksList = [];
+
+        document.getElementById('stockForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const errorDiv = document.getElementById('errorMsg');
+            errorDiv.classList.add('hidden');
+            errorDiv.innerHTML = '';
+
+            const ticker = document.getElementById('ticker').value.toUpperCase().trim();
+            const purchaseDate = document.getElementById('purchaseDate').value;
+            
+            const targetVal = document.getElementById('targetReturn').value;
+            const targetReturn = targetVal !== "" ? parseFloat(targetVal) : NaN;
+            
+            const monthsVal = document.getElementById('months').value;
+            const months = monthsVal !== "" ? parseInt(monthsVal) : NaN;
+
+            // Identificazione Categoria
+            let category = "Nessuna / Personalizzata";
+            if (targetReturn === 15 && months === 3) category = "medio 3m";
+            else if (targetReturn === 50 && months === 12) category = "medio 1y";
+            else if (isNaN(targetReturn) && months === 60) category = "lungo";
+
+            const submitBtn = document.getElementById('submitBtn');
+            const originalBtnHtml = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Elaborazione...';
+
+            try {
+                const chartData = await fetchRealMarketData(ticker, purchaseDate, targetReturn, months);
+                const newStock = { id: Date.now(), ticker, targetReturn, months, category, chartData };
+                stocksList.unshift(newStock); 
+                renderStocks();
+            } catch (err) {
+                errorDiv.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> ${err.message}`;
+                errorDiv.classList.remove('hidden');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalBtnHtml;
+            }
+        });
+
+        function removeStock(id) {
+            stocksList = stocksList.filter(s => s.id !== id);
+            renderStocks();
+        }
+
+        function formatNumber(num) {
+            const isPositive = num >= 0;
+            const color = isPositive ? 'text-emerald-600' : 'text-red-500';
+            const sign = isPositive ? '+' : '';
+            return `<span class="${color} font-bold">${sign}${num.toFixed(2)}%</span>`;
+        }
+
+        function renderStocks() {
+            const container = document.getElementById('chartsContainer');
+            container.innerHTML = '';
+
+            stocksList.forEach(stock => {
+                const stats = stock.chartData.finalStats;
+                const beatMarket = stats.stockFinal > stats.sp500Final;
+                
+                let targetHtmlBlock = '';
+                if (stats.hasTarget) {
+                    const beatTarget = stats.stockFinal >= stats.targetFinal;
+                    targetHtmlBlock = `
+                        <div class="text-center border-l border-slate-200">
+                            <p class="text-xs text-slate-500 font-semibold uppercase mb-1">Obiettivo Globale</p>
+                            <div class="text-xl text-slate-700 font-bold">${stats.targetFinal.toFixed(2)}%</div>
+                            <p class="text-[10px] mt-1 ${beatTarget ? 'text-emerald-600' : 'text-orange-500'}">
+                                ${beatTarget ? '<i class="fa-solid fa-check-circle"></i> Raggiunto' : '<i class="fa-solid fa-clock"></i> In corso'}
+                            </p>
+                        </div>
+                    `;
+                }
+                const gridCols = stats.hasTarget ? 'grid-cols-3' : 'grid-cols-2';
+
+                // --- SISTEMA DI ALLERTE ---
+                let bgClass = "bg-white border-slate-200";
+                let alertHtml = "";
+
+                if (stock.category === 'medio 1y') {
+                    if (stats.maxConsecutiveUnder >= 3 && stats.beta < 1.1) {
+                        bgClass = "bg-yellow-100 border-yellow-400"; // Sfondo giallo
+                        alertHtml = `
+                        <div class="mb-4 p-3 bg-yellow-200 text-yellow-800 rounded-lg flex items-center gap-3 font-semibold text-sm shadow-sm">
+                            <i class="fa-solid fa-triangle-exclamation text-xl"></i>
+                            <div><strong>ALLERTA MEDIO 1Y:</strong> Sottoperformance rispetto l'S&P 500 per 3 o più mesi consecutivi e Beta minore di 1.1!</div>
+                        </div>`;
+                    }
+                } else if (stock.category === 'lungo') {
+                    if (stats.maxConsecutiveUnder >= 6 || stats.beta > 1.1) {
+                        bgClass = "bg-yellow-100 border-yellow-400"; // Sfondo giallo
+                        alertHtml = `
+                        <div class="mb-4 p-3 bg-yellow-200 text-yellow-800 rounded-lg flex items-center gap-3 font-semibold text-sm shadow-sm">
+                            <i class="fa-solid fa-triangle-exclamation text-xl"></i>
+                            <div><strong>ALLERTA LUNGO:</strong> Sottoperformance rispetto l'S&P 500 per 6 o più mesi consecutivi, o Beta superiore a 1.1!</div>
+                        </div>`;
+                    }
+                }
+
+                // Generazione righe per la tabella Visualizzazione Verticale Mese su Mese
+                let momRows = '';
+                // Partiamo da 1 perché l'indice 0 rappresenta il mese base di acquisto
+                for(let k = 1; k < stock.chartData.labels.length; k++) {
+                    const sVal = stock.chartData.stockMoM[k];
+                    const spVal = stock.chartData.sp500MoM[k];
+                    const sColor = sVal >= 0 ? 'text-emerald-600' : 'text-red-500';
+                    const spColor = spVal >= 0 ? 'text-emerald-600' : 'text-red-500';
+                    
+                    momRows += `
+                        <tr class="border-b border-slate-200/50 hover:bg-slate-100 transition-colors">
+                            <td class="py-2 text-slate-700 font-medium">${stock.chartData.labels[k]}</td>
+                            <td class="py-2 text-right ${sColor} font-bold">${sVal > 0 ? '+' : ''}${sVal.toFixed(2)}%</td>
+                            <td class="py-2 text-right ${spColor}">${spVal > 0 ? '+' : ''}${spVal.toFixed(2)}%</td>
+                        </tr>
+                    `;
+                }
+
+                const card = document.createElement('div');
+                card.className = `${bgClass} p-6 rounded-2xl shadow-sm border flex flex-col h-full transition-colors duration-300`;
+                
+                // Integrazione Layout con Visualizzazione Verticale Laterale
+                card.innerHTML = `
+                    <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-200/50">
+                        <div>
+                            <h3 class="text-2xl font-extrabold text-slate-900">${stock.ticker}</h3>
+                            <p class="text-xs font-medium text-slate-500 uppercase tracking-wide">Analisi di ${stats.monthsAnalyzed} mesi</p>
+                        </div>
+                        <button onclick="removeStock(${stock.id})" class="text-slate-400 hover:text-red-500 transition-colors p-2 rounded-full bg-white/50 hover:bg-white" title="Rimuovi">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+
+                    ${alertHtml}
+
+                    <div class="flex flex-col lg:flex-row gap-6 mt-2 flex-grow">
+                        
+                        <!-- Colonna Sinistra: Dashboard e Grafico Globale -->
+                        <div class="flex-grow flex flex-col w-full lg:w-2/3">
+                            <div class="grid ${gridCols} gap-4 mb-4 bg-white/70 p-4 rounded-xl border border-slate-200/50 shadow-inner">
+                                <div class="text-center">
+                                    <p class="text-xs text-slate-500 font-semibold uppercase mb-1">Rendimento Globale</p>
+                                    <div class="text-xl">${formatNumber(stats.stockFinal)}</div>
+                                </div>
+                                <div class="text-center border-l border-slate-200">
+                                    <p class="text-xs text-slate-500 font-semibold uppercase mb-1">S&P 500 Globale</p>
+                                    <div class="text-xl">${formatNumber(stats.sp500Final)}</div>
+                                    <p class="text-[10px] mt-1 ${beatMarket ? 'text-emerald-600' : 'text-red-500'}">
+                                        ${beatMarket ? '<i class="fa-solid fa-arrow-trend-up"></i> Batte Mercato' : '<i class="fa-solid fa-arrow-trend-down"></i> Sotto Mercato'}
+                                    </p>
+                                </div>
+                                ${targetHtmlBlock}
+                            </div>
+
+                            <div class="w-full flex-grow min-h-[300px] bg-white rounded-xl p-3 border border-slate-100 shadow-sm">
+                                <canvas id="canvas-${stock.id}"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Colonna Destra: VISUALIZZAZIONE VERTICALE -->
+                        <div class="w-full lg:w-1/3 flex flex-col bg-slate-50 rounded-xl border border-slate-200 shadow-inner p-4 max-h-[450px]">
+                            <h4 class="font-bold text-slate-800 text-sm mb-3 pb-2 border-b border-slate-200 uppercase tracking-wide flex justify-between items-center">
+                                <span><i class="fa-solid fa-layer-group mr-1"></i> Analisi Verticale</span>
+                            </h4>
+                            
+                            <!-- Metriche Extra -->
+                            <div class="grid grid-cols-2 gap-2 mb-4">
+                                <div class="bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                                    <p class="text-[9px] text-slate-400 uppercase font-bold mb-1">Categoria</p>
+                                    <p class="text-sm font-semibold text-blue-700 capitalize">${stock.category}</p>
+                                </div>
+                                <div class="bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm">
+                                    <p class="text-[9px] text-slate-400 uppercase font-bold mb-1">Beta (vs SP500)</p>
+                                    <p class="text-sm font-semibold text-slate-800">${stats.beta.toFixed(2)}</p>
+                                </div>
+                            </div>
+
+                            <!-- Tabella Rendimenti Mese su Mese -->
+                            <h5 class="text-[10px] text-slate-500 font-bold uppercase mb-2">Rendimenti Mese su Mese</h5>
+                            <div class="flex-grow overflow-y-auto pr-2 custom-scrollbar bg-white rounded border border-slate-100 p-2 shadow-sm">
+                                <table class="w-full text-xs text-left">
+                                    <thead class="sticky top-0 bg-white shadow-sm z-10 border-b border-slate-200">
+                                        <tr>
+                                            <th class="py-2 text-slate-500 font-semibold text-[10px] uppercase">Mese</th>
+                                            <th class="py-2 text-right text-slate-500 font-semibold text-[10px] uppercase">Azione</th>
+                                            <th class="py-2 text-right text-slate-500 font-semibold text-[10px] uppercase">SP500</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${momRows}
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <div class="mt-3 text-center text-[9px] text-slate-400">
+                                Mesi consecutivi sottoperformance: <strong class="text-slate-600">${stats.maxConsecutiveUnder}</strong>
+                            </div>
+                        </div>
+                        
+                    </div>
+                `;
+                container.appendChild(card);
+
+                // Disegno Grafico
+                const chartDatasets = [
+                    {
+                        label: stock.ticker,
+                        data: stock.chartData.stock,
+                        borderColor: '#2563eb',
+                        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 2,
+                        pointHoverRadius: 6
+                    },
+                    {
+                        label: 'S&P 500',
+                        data: stock.chartData.sp500,
+                        borderColor: '#94a3b8',
+                        borderWidth: 2,
+                        borderDash: [2, 2],
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 4
+                    }
+                ];
+
+                if (stats.hasTarget) {
+                    chartDatasets.push({
+                        label: 'Target',
+                        data: stock.chartData.target,
+                        borderColor: '#f59e0b',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 0
+                    });
+                }
+
+                const ctx = document.getElementById(`canvas-${stock.id}`).getContext('2d');
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: stock.chartData.labels,
+                        datasets: chartDatasets
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } },
+                            tooltip: {
+                                backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                                titleFont: { size: 14 },
+                                bodyFont: { size: 13 },
+                                padding: 12,
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) label += ': ';
+                                        if (context.parsed.y !== null) {
+                                            label += context.parsed.y > 0 ? '+' : '';
+                                            label += context.parsed.y.toFixed(2) + '%';
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { grid: { display: false } },
+                            y: {
+                                border: { display: false },
+                                grid: { color: '#f1f5f9' },
+                                ticks: { callback: (val) => val + '%', color: '#64748b' }
+                            }
+                        }
+                    }
+                });
+            });
+        }
+    </script>
+</body>
+</html>
